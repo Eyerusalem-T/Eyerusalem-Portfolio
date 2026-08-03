@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inbox — Admin</title>
+<style>
+  :root{
+    --bg:#080B0A; --surface:#0F1614; --surface-2:#151E1B; --line:#1E2A26;
+    --text:#EAF2EF; --muted:#7D9089; --mint:#34D8A6; --red:#F0665E;
+  }
+  *{box-sizing:border-box;}
+  body{background:var(--bg); color:var(--text); font-family:ui-monospace,'JetBrains Mono',monospace; margin:0; padding:32px 20px;}
+  .wrap{max-width:760px; margin:0 auto;}
+  h1{font-size:20px; margin-bottom:4px;}
+  .sub{color:var(--muted); font-size:13px; margin-bottom:28px;}
+  .gate{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:24px; max-width:420px; margin:60px auto;}
+  .gate input{width:100%; background:var(--bg); border:1px solid var(--line); color:var(--text); padding:10px 12px; border-radius:8px; margin:12px 0; font-family:inherit; font-size:14px;}
+  button{font-family:inherit; font-size:13px; font-weight:600; background:var(--mint); color:#052018; border:none; padding:10px 18px; border-radius:7px; cursor:pointer;}
+  button:hover{opacity:0.9;}
+  button.secondary{background:transparent; border:1px solid var(--line); color:var(--text);}
+  .msg{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px;}
+  .msg-head{display:flex; justify-content:space-between; gap:12px; font-size:13px; color:var(--muted); margin-bottom:10px; flex-wrap:wrap;}
+  .msg-head strong{color:var(--text);}
+  .msg-body{font-size:14.5px; line-height:1.6; margin-bottom:14px; white-space:pre-wrap;}
+  .badge{font-size:11px; padding:3px 9px; border-radius:20px; border:1px solid var(--line);}
+  .badge.replied{color:var(--mint); border-color:var(--mint);}
+  .badge.pending{color:var(--red); border-color:var(--red);}
+  textarea{width:100%; background:var(--bg); border:1px solid var(--line); color:var(--text); padding:10px 12px; border-radius:8px; min-height:80px; font-family:inherit; font-size:13.5px; margin-bottom:10px;}
+  .reply-existing{background:var(--surface-2); border-left:2px solid var(--mint); padding:10px 12px; border-radius:6px; font-size:13px; color:var(--muted); margin-bottom:12px; white-space:pre-wrap;}
+  .status{font-size:12px; margin-top:8px;}
+  .empty{text-align:center; color:var(--muted); padding:60px 0;}
+  .top-row{display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+const API_BASE = window.location.origin;
+let token = localStorage.getItem('admin_token') || '';
+
+function render() {
+  const app = document.getElementById('app');
+  if (!token) {
+    app.innerHTML = `
+      <div class="gate">
+        <h1>Admin inbox</h1>
+        <p class="sub">Enter the ADMIN_TOKEN set in your server's .env file.</p>
+        <input type="password" id="tokenInput" placeholder="Admin token">
+        <button onclick="login()">Unlock</button>
+      </div>`;
+    return;
+  }
+  app.innerHTML = `
+    <div class="top-row">
+      <div><h1>Inbox</h1><p class="sub" style="margin:0">Messages from your portfolio contact form</p></div>
+      <button class="secondary" onclick="logout()">Log out</button>
+    </div>
+    <div id="list">Loading…</div>`;
+  loadMessages();
+}
+
+function login() {
+  const val = document.getElementById('tokenInput').value.trim();
+  if (!val) return;
+  token = val;
+  localStorage.setItem('admin_token', token);
+  render();
+}
+
+function logout() {
+  token = '';
+  localStorage.removeItem('admin_token');
+  render();
+}
+
+async function loadMessages() {
+  const list = document.getElementById('list');
+  try {
+    const res = await fetch(`${API_BASE}/api/messages`, { headers: { 'x-admin-token': token } });
+    if (res.status === 401) { logout(); return; }
+    const messages = await res.json();
+    if (!messages.length) {
+      list.innerHTML = `<div class="empty">No messages yet.</div>`;
+      return;
+    }
+    list.innerHTML = messages.map(renderMessage).join('');
+  } catch (err) {
+    list.innerHTML = `<div class="empty">Could not reach the API. Is the server running?</div>`;
+  }
+}
+
+function renderMessage(m) {
+  const date = new Date(m.createdAt).toLocaleString();
+  return `
+    <div class="msg">
+      <div class="msg-head">
+        <div><strong>${escapeHtml(m.name)}</strong> — ${escapeHtml(m.email)} · ${date}</div>
+        <span class="badge ${m.replied ? 'replied' : 'pending'}">${m.replied ? 'Replied' : 'Pending'}</span>
+      </div>
+      <div class="msg-body">${escapeHtml(m.message)}</div>
+      ${m.replied ? `<div class="reply-existing">Your reply: ${escapeHtml(m.replyText)}</div>` : `
+        <textarea id="reply-${m.id}" placeholder="Write a reply — sent by email to ${escapeHtml(m.email)}"></textarea>
+        <button onclick="sendReply('${m.id}')">Send reply</button>
+        <div class="status" id="status-${m.id}"></div>
+      `}
+    </div>`;
+}
+
+async function sendReply(id) {
+  const textarea = document.getElementById(`reply-${id}`);
+  const status = document.getElementById(`status-${id}`);
+  const replyText = textarea.value.trim();
+  if (!replyText) return;
+  status.textContent = 'Sending…';
+  try {
+    const res = await fetch(`${API_BASE}/api/messages/${id}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': token },
+      body: JSON.stringify({ replyText }),
+    });
+    const data = await res.json();
+    if (data.ok && data.emailed) {
+      status.textContent = '✓ Sent';
+      loadMessages();
+    } else if (data.ok) {
+      status.textContent = '✓ Saved, but not emailed (' + (data.note || 'SMTP not configured') + ')';
+      loadMessages();
+    } else {
+      status.textContent = '✗ ' + (data.error || 'Failed to send');
+    }
+  } catch (err) {
+    status.textContent = '✗ Network error';
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+render();
+</script>
+</body>
+</html>
