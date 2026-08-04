@@ -301,7 +301,7 @@ export default function PortfolioPro() {
   const [status, setStatus] = useState({ state: "idle", msg: "" });
 
   // Point this at your deployed backend once it's live.
-  const API_URL = "http://localhost:4000/api/contact";
+  const API_URL = "https://portfolio-backend-s7qz.onrender.com";
 
   const onField = (e) =>
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
